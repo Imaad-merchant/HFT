@@ -8,3 +8,6 @@ models/
 evolution_fitness.csv
 *.zip
 .DS_Store
+dashboard/hmm_forecast_*.png
+dashboard/hmm_forecast_*.csv
+dashboard/site/

@@ -1,0 +1,18 @@
+# Minimal dependencies for building the static HMM dashboard in CI.
+# This is a strict subset of the project root requirements.txt — it leaves
+# out torch / stable-baselines3 / giotto-tda which the dashboard never touches
+# and which would otherwise dominate the CI build time.
+yfinance
+pandas
+numpy
+scipy
+scikit-learn
+hmmlearn
+matplotlib
+duckdb
+loguru
+python-dotenv
+fredapi
+pandas-datareader
+requests
+vaderSentiment

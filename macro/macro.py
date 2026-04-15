@@ -10,6 +10,8 @@ from loguru import logger
 from pathlib import Path
 from dotenv import load_dotenv
 
+from macro.hmm_regime import HMMRegimeDetector, DEFAULT_PRIMARIES
+
 load_dotenv()
 
 DB_PATH = Path(__file__).parent.parent / "aria.db"
@@ -35,6 +37,12 @@ class MacroEngine:
         self.db_path = str(db_path or DB_PATH)
         self.fred_key = os.getenv("FRED_API_KEY", "")
         self.news_key = os.getenv("NEWS_API_KEY", "")
+        # One HMM per equity index primary (ES, NQ). Each is fit independently
+        # with its own feature panel and labelled state map.
+        self.hmm_models: dict[str, HMMRegimeDetector] = {
+            asset: HMMRegimeDetector(self.db_path, primary_asset=asset)
+            for asset in DEFAULT_PRIMARIES
+        }
         self._init_db()
 
     def _init_db(self):
@@ -352,9 +360,39 @@ class MacroEngine:
         con.close()
         return features
 
+    def run_hmm_forecast(self, refresh_visuals: bool = True) -> dict[str, dict]:
+        """Run the HMM regime forecaster for every equity primary (ES, NQ).
+
+        Lazily fits each model on first call. Safe to call repeatedly — the
+        prediction step is cheap. Per-asset failures are isolated and logged
+        so the rest of the macro pipeline keeps running. When `refresh_visuals`
+        is True, also writes per-asset PNG/CSV trajectories to dashboard/.
+        """
+        out: dict[str, dict] = {}
+        for asset, det in self.hmm_models.items():
+            try:
+                if not det.load():
+                    logger.info("HMM[{}]: no saved model — fitting on available history", asset)
+                    det.fit()
+                fc = det.predict()
+                logger.info(
+                    "HMM[{}] | regime={} P(dump now)={:.1%} P(dump 1d)={:.1%} P(dump 2d)={:.1%}",
+                    asset, fc.current_regime, fc.p_dump_now, fc.p_dump_1d, fc.p_dump_2d,
+                )
+                out[asset] = fc.to_dict()
+                if refresh_visuals:
+                    try:
+                        det.plot_forecast(n_days=30)
+                    except Exception as ve:
+                        logger.debug("HMM[{}] visualization failed: {}", asset, ve)
+            except Exception as e:
+                logger.error("HMM[{}] forecast failed: {}", asset, e)
+        return out
+
     def run(self):
         """Run full macro update cycle."""
         self.fetch_fred_data()
         self.fetch_news_sentiment()
         self.classify_regime()
+        self.run_hmm_forecast()
         logger.info("Macro engine update complete")
