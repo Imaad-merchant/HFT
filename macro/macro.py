@@ -10,7 +10,7 @@ from loguru import logger
 from pathlib import Path
 from dotenv import load_dotenv
 
-from macro.hmm_regime import HMMRegimeDetector
+from macro.hmm_regime import HMMRegimeDetector, DEFAULT_PRIMARIES
 
 load_dotenv()
 
@@ -37,7 +37,12 @@ class MacroEngine:
         self.db_path = str(db_path or DB_PATH)
         self.fred_key = os.getenv("FRED_API_KEY", "")
         self.news_key = os.getenv("NEWS_API_KEY", "")
-        self.hmm = HMMRegimeDetector(self.db_path)
+        # One HMM per equity index primary (ES, NQ). Each is fit independently
+        # with its own feature panel and labelled state map.
+        self.hmm_models: dict[str, HMMRegimeDetector] = {
+            asset: HMMRegimeDetector(self.db_path, primary_asset=asset)
+            for asset in DEFAULT_PRIMARIES
+        }
         self._init_db()
 
     def _init_db(self):
@@ -355,26 +360,28 @@ class MacroEngine:
         con.close()
         return features
 
-    def run_hmm_forecast(self) -> dict:
-        """Run the HMM regime forecaster and return a serialisable dict.
+    def run_hmm_forecast(self) -> dict[str, dict]:
+        """Run the HMM regime forecaster for every equity primary (ES, NQ).
 
-        Lazily fits the model on first call. Safe to call repeatedly — the
-        prediction step is cheap. Failures are logged and return an empty dict
+        Lazily fits each model on first call. Safe to call repeatedly — the
+        prediction step is cheap. Per-asset failures are isolated and logged
         so the rest of the macro pipeline keeps running.
         """
-        try:
-            if not self.hmm.load():
-                logger.info("HMM: no saved model — fitting on available history")
-                self.hmm.fit()
-            fc = self.hmm.predict()
-            logger.info(
-                "HMM forecast | regime={} P(dump now)={:.1%} P(dump 1d)={:.1%} P(dump 2d)={:.1%}",
-                fc.current_regime, fc.p_dump_now, fc.p_dump_1d, fc.p_dump_2d,
-            )
-            return fc.to_dict()
-        except Exception as e:
-            logger.error("HMM forecast failed: {}", e)
-            return {}
+        out: dict[str, dict] = {}
+        for asset, det in self.hmm_models.items():
+            try:
+                if not det.load():
+                    logger.info("HMM[{}]: no saved model — fitting on available history", asset)
+                    det.fit()
+                fc = det.predict()
+                logger.info(
+                    "HMM[{}] | regime={} P(dump now)={:.1%} P(dump 1d)={:.1%} P(dump 2d)={:.1%}",
+                    asset, fc.current_regime, fc.p_dump_now, fc.p_dump_1d, fc.p_dump_2d,
+                )
+                out[asset] = fc.to_dict()
+            except Exception as e:
+                logger.error("HMM[{}] forecast failed: {}", asset, e)
+        return out
 
     def run(self):
         """Run full macro update cycle."""
