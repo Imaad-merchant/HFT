@@ -360,12 +360,13 @@ class MacroEngine:
         con.close()
         return features
 
-    def run_hmm_forecast(self) -> dict[str, dict]:
+    def run_hmm_forecast(self, refresh_visuals: bool = True) -> dict[str, dict]:
         """Run the HMM regime forecaster for every equity primary (ES, NQ).
 
         Lazily fits each model on first call. Safe to call repeatedly — the
         prediction step is cheap. Per-asset failures are isolated and logged
-        so the rest of the macro pipeline keeps running.
+        so the rest of the macro pipeline keeps running. When `refresh_visuals`
+        is True, also writes per-asset PNG/CSV trajectories to dashboard/.
         """
         out: dict[str, dict] = {}
         for asset, det in self.hmm_models.items():
@@ -379,6 +380,11 @@ class MacroEngine:
                     asset, fc.current_regime, fc.p_dump_now, fc.p_dump_1d, fc.p_dump_2d,
                 )
                 out[asset] = fc.to_dict()
+                if refresh_visuals:
+                    try:
+                        det.plot_forecast(n_days=30)
+                    except Exception as ve:
+                        logger.debug("HMM[{}] visualization failed: {}", asset, ve)
             except Exception as e:
                 logger.error("HMM[{}] forecast failed: {}", asset, e)
         return out

@@ -588,6 +588,269 @@ class HMMRegimeDetector:
             self.fit()
         return self.predict()
 
+    # ----------------------------------------------------------- horizon
+
+    def forecast_horizon(self, n_days: int = 30) -> pd.DataFrame:
+        """Roll the current state posterior forward N trading days bar-by-bar.
+
+        Returns one row per future bar with columns:
+          - bar, day:                bar index and fractional trading-day index
+          - p_<LABEL>:               P(regime = label) at that future bar
+          - p_dump:                  P(CRASH or BEAR) at that future bar
+          - e_ret_per_bar:           state-mixture expected log-return for that bar
+          - cum_e_logret:            cumulative expected log-return from now to that bar
+        """
+        if self.model is None and not self.load():
+            raise RuntimeError("No HMM model loaded — call fit() first.")
+
+        closes = self._load_aligned_closes()
+        X, cols, idx = self._build_features(closes)
+        if cols != self.feature_cols:
+            raise RuntimeError(
+                f"Feature columns changed since fit: model expects {self.feature_cols}, got {cols}. "
+                "Refit the model."
+            )
+        if len(X) == 0:
+            raise RuntimeError("No features available for forecast horizon.")
+
+        Xz = (X - self.feature_mean) / self.feature_std
+        gamma = self.model.predict_proba(Xz)
+        current = gamma[-1].copy()
+
+        T = self.model.transmat_
+        bars_per_day = max(1, self.bars_per_day)
+        total_bars = int(n_days * bars_per_day)
+
+        mean_vec = np.array([self.state_mean_return.get(s, 0.0) for s in range(self.n_states)])
+        dump_state_ids = [sid for sid, lab in self.state_label_map.items() if lab in DUMP_REGIMES]
+        regime_columns = REGIME_LABELS[: self.n_states]
+
+        rows = []
+        p = current
+        cum_logret = 0.0
+
+        for bar_idx in range(total_bars + 1):
+            day = bar_idx / bars_per_day
+            regime_probs = {label: 0.0 for label in regime_columns}
+            for sid, prob in enumerate(p):
+                label = self.state_label_map.get(sid, f"S{sid}")
+                if label in regime_probs:
+                    regime_probs[label] += float(prob)
+
+            p_dump = float(sum(p[s] for s in dump_state_ids))
+            e_ret = float(p @ mean_vec)
+            cum_logret += e_ret if bar_idx > 0 else 0.0
+
+            row = {
+                "bar": bar_idx,
+                "day": day,
+                "p_dump": p_dump,
+                "e_ret_per_bar": e_ret,
+                "cum_e_logret": cum_logret,
+            }
+            for label in regime_columns:
+                row[f"p_{label}"] = regime_probs[label]
+            rows.append(row)
+
+            # Step the chain forward one bar (skip on the last iteration is fine — we don't use it)
+            p = p @ T
+
+        return pd.DataFrame(rows)
+
+    def expected_first_passage_to_dump(self) -> Optional[float]:
+        """Expected number of trading days until the chain first enters a dump state.
+
+        Computes the mean first-passage time to the dump set analytically by
+        treating the dump states as absorbing: solve `(I - Q) h = 1` on the
+        transient submatrix Q, then look up the entry for the current state.
+
+        Returns:
+          - 0.0 if the current state is already a dump state
+          - float days if reachable from the current state via positive-probability
+            transitions, the linear system is well-conditioned, and the solution
+            is finite and non-negative
+          - None otherwise (model not loaded, dump set unreachable, singular
+            system, numerical blow-up)
+        """
+        if self.model is None and not self.load():
+            return None
+
+        closes = self._load_aligned_closes()
+        X, cols, idx = self._build_features(closes)
+        if cols != self.feature_cols or len(X) == 0:
+            return None
+        Xz = (X - self.feature_mean) / self.feature_std
+        gamma = self.model.predict_proba(Xz)
+        current_state = int(np.argmax(gamma[-1]))
+
+        dump_state_ids = {sid for sid, lab in self.state_label_map.items() if lab in DUMP_REGIMES}
+        if current_state in dump_state_ids:
+            return 0.0
+
+        T = self.model.transmat_
+        n = T.shape[0]
+
+        # ---- Reachability check ----
+        # If no positive-probability path from current_state into the dump set
+        # exists, the analytic first-passage time is +infinity. Detect this by
+        # BFS on the directed graph of nonzero transitions.
+        EPSILON = 1e-9
+        visited: set[int] = {current_state}
+        stack: list[int] = [current_state]
+        reached_dump = False
+        while stack:
+            s = stack.pop()
+            for j in range(n):
+                if T[s, j] > EPSILON and j not in visited:
+                    if j in dump_state_ids:
+                        reached_dump = True
+                        stack.clear()
+                        break
+                    visited.add(j)
+                    stack.append(j)
+        if not reached_dump:
+            return None
+
+        # ---- Solve (I - Q) h = 1 on the transient submatrix ----
+        transient = [s for s in range(n) if s not in dump_state_ids]
+        if not transient:
+            return None
+        Q = T[np.ix_(transient, transient)]
+        A = np.eye(len(transient)) - Q
+
+        # Reject ill-conditioned systems before they produce nonsense
+        if not np.all(np.isfinite(A)) or np.linalg.cond(A) > 1e10:
+            return None
+
+        try:
+            h = np.linalg.solve(A, np.ones(len(transient)))
+        except np.linalg.LinAlgError:
+            return None
+
+        state_to_idx = {s: i for i, s in enumerate(transient)}
+        if current_state not in state_to_idx:
+            return None
+
+        bars = float(h[state_to_idx[current_state]])
+        if not np.isfinite(bars) or bars < 0:
+            return None
+
+        return bars / max(1, self.bars_per_day)
+
+    def plot_forecast(
+        self,
+        n_days: int = 30,
+        output_dir: str | Path = "dashboard",
+    ) -> Path:
+        """Render a 3-panel forecast chart and save to dashboard/.
+
+        Panels:
+          1. Stacked area of regime probabilities over the forecast horizon
+          2. P(dump) decay curve with the expected-first-passage marker
+          3. Expected cumulative log-return path
+
+        Returns the PNG path. Also writes a `.csv` with the raw trajectory.
+        """
+        # Lazy import — matplotlib is optional and only needed for visuals
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+        df = self.forecast_horizon(n_days=n_days)
+        fpt_days = self.expected_first_passage_to_dump()
+
+        # Pull the current row to label the chart
+        current_row = df.iloc[0]
+        regime_columns = [f"p_{lab}" for lab in REGIME_LABELS[: self.n_states] if f"p_{lab}" in df.columns]
+        current_probs = {col[2:]: float(current_row[col]) for col in regime_columns}
+        current_regime = max(current_probs.items(), key=lambda kv: kv[1])[0]
+
+        if fpt_days is None:
+            fpt_label = "dump unreachable from current state"
+        elif fpt_days == 0.0:
+            fpt_label = "currently in dump state"
+        else:
+            fpt_label = f"~{fpt_days:.1f} trading days"
+
+        fig, axes = plt.subplots(3, 1, figsize=(11, 10), sharex=True)
+        fig.suptitle(
+            f"HMM Regime Forecast — {self.primary_asset}\n"
+            f"Current: {current_regime}   |   "
+            f"Expected first dump transition: {fpt_label}   |   "
+            f"Horizon: {n_days} trading days",
+            fontsize=12, fontweight="bold",
+        )
+
+        # Stable colour scheme so ES and NQ panels look the same
+        REGIME_COLORS = {
+            "BULL":   "#2ecc71",
+            "NORMAL": "#f1c40f",
+            "BEAR":   "#e67e22",
+            "CRASH":  "#c0392b",
+        }
+
+        days = df["day"].values
+
+        # ---- Panel 1: stacked regime probabilities ----
+        ax1 = axes[0]
+        # Order BULL -> CRASH so the dump regimes are at the top of the stack
+        ordered = [lab for lab in ["BULL", "NORMAL", "BEAR", "CRASH"] if f"p_{lab}" in df.columns]
+        stacks = [df[f"p_{lab}"].values for lab in ordered]
+        colors = [REGIME_COLORS.get(lab, "#95a5a6") for lab in ordered]
+        ax1.stackplot(days, *stacks, labels=ordered, colors=colors, alpha=0.9)
+        ax1.set_ylabel("Regime probability")
+        ax1.set_ylim(0, 1)
+        ax1.set_xlim(0, max(1.0, float(days.max())))
+        ax1.legend(loc="upper right", framealpha=0.92, ncol=len(ordered), fontsize=9)
+        ax1.set_title("Forward regime distribution (rolled under fitted transition matrix)", fontsize=10)
+        ax1.grid(True, alpha=0.3)
+
+        # ---- Panel 2: P(dump) decay curve + first-passage marker ----
+        ax2 = axes[1]
+        ax2.plot(days, df["p_dump"].values, color="#c0392b", linewidth=2.5,
+                 label="P(dump = CRASH ∪ BEAR)")
+        ax2.fill_between(days, 0, df["p_dump"].values, color="#c0392b", alpha=0.18)
+        ax2.axhline(0.5, color="gray", linestyle="--", linewidth=0.8, alpha=0.7, label="50% threshold")
+        if fpt_days is not None and fpt_days > 0 and fpt_days <= float(days.max()):
+            ax2.axvline(fpt_days, color="black", linestyle=":", linewidth=1.6,
+                        label=f"E[first dump] = {fpt_days:.1f}d")
+        # Mark the *current* P(dump) value
+        ax2.scatter([0], [df["p_dump"].iloc[0]], color="black", zorder=5, s=40)
+        ax2.set_ylabel("P(dump)")
+        ax2.set_ylim(0, 1)
+        ax2.legend(loc="upper right", framealpha=0.92, fontsize=9)
+        ax2.set_title("Probability of being in a CRASH or BEAR regime", fontsize=10)
+        ax2.grid(True, alpha=0.3)
+
+        # ---- Panel 3: expected cumulative log-return path ----
+        ax3 = axes[2]
+        cum_pct = df["cum_e_logret"].values * 100.0
+        ax3.plot(days, cum_pct, color="#2980b9", linewidth=2.5)
+        ax3.fill_between(days, 0, cum_pct, where=(cum_pct >= 0),
+                         interpolate=True, color="#2ecc71", alpha=0.3, label="positive drift")
+        ax3.fill_between(days, 0, cum_pct, where=(cum_pct < 0),
+                         interpolate=True, color="#c0392b", alpha=0.3, label="negative drift")
+        ax3.axhline(0.0, color="gray", linestyle="-", linewidth=0.5)
+        ax3.set_xlabel("Trading days from now")
+        ax3.set_ylabel("Cumulative E[log-return] (%)")
+        ax3.set_title("State-mixture expected return path", fontsize=10)
+        ax3.legend(loc="upper right", framealpha=0.92, fontsize=9)
+        ax3.grid(True, alpha=0.3)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+        png_path = output_dir / f"hmm_forecast_{self.primary_asset.lower()}.png"
+        csv_path = output_dir / f"hmm_forecast_{self.primary_asset.lower()}.csv"
+        fig.savefig(png_path, dpi=120, bbox_inches="tight")
+        plt.close(fig)
+        df.to_csv(csv_path, index=False)
+
+        logger.info("HMM[{}]: saved visualization {} (data {})", self.primary_asset, png_path, csv_path)
+        return png_path
+
 
 # --------------------------------------------------------------------- CLI
 
@@ -633,6 +896,16 @@ def _parse_asset_arg(argv: list[str]) -> list[str]:
     return list(DEFAULT_PRIMARIES)
 
 
+def _parse_int_arg(argv: list[str], flag: str, default: int) -> int:
+    for i, tok in enumerate(argv):
+        if tok == flag and i + 1 < len(argv):
+            try:
+                return int(argv[i + 1])
+            except ValueError:
+                pass
+    return default
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "run"
     assets = _parse_asset_arg(argv)
@@ -663,8 +936,34 @@ def main(argv: list[str]) -> int:
             _print_forecast(fc)
         _print_summary(forecasts)
         return 0
+    if cmd == "visualize":
+        n_days = _parse_int_arg(argv, "--days", 30)
+        out_dir = Path("dashboard")
+        for i, tok in enumerate(argv):
+            if tok == "--out" and i + 1 < len(argv):
+                out_dir = Path(argv[i + 1])
+        paths: list[Path] = []
+        for a in assets:
+            det = HMMRegimeDetector(primary_asset=a)
+            if not det.load():
+                print(f"No saved model for {a} — fitting first...", file=sys.stderr)
+                det.fit()
+            paths.append(det.plot_forecast(n_days=n_days, output_dir=out_dir))
+            fpt = det.expected_first_passage_to_dump()
+            if fpt is None:
+                fpt_str = "n/a"
+            elif fpt == 0.0:
+                fpt_str = "currently in dump"
+            else:
+                fpt_str = f"~{fpt:.1f} trading days"
+            print(f"  {a}: E[first dump transition] = {fpt_str}")
+        print("Saved visualizations:")
+        for p in paths:
+            print(f"  {p}")
+        return 0
 
-    print(f"Unknown command: {cmd}. Use fit | predict | run [--asset ES,NQ]", file=sys.stderr)
+    print(f"Unknown command: {cmd}. Use fit | predict | run | visualize [--asset ES,NQ] [--days N]",
+          file=sys.stderr)
     return 2
 
 
