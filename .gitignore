@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+aria.db
+aria_health.json
+logs/
+models/
+evolution_fitness.csv
+*.zip
+.DS_Store
