@@ -10,6 +10,8 @@ from loguru import logger
 from pathlib import Path
 from dotenv import load_dotenv
 
+from macro.hmm_regime import HMMRegimeDetector
+
 load_dotenv()
 
 DB_PATH = Path(__file__).parent.parent / "aria.db"
@@ -35,6 +37,7 @@ class MacroEngine:
         self.db_path = str(db_path or DB_PATH)
         self.fred_key = os.getenv("FRED_API_KEY", "")
         self.news_key = os.getenv("NEWS_API_KEY", "")
+        self.hmm = HMMRegimeDetector(self.db_path)
         self._init_db()
 
     def _init_db(self):
@@ -352,9 +355,31 @@ class MacroEngine:
         con.close()
         return features
 
+    def run_hmm_forecast(self) -> dict:
+        """Run the HMM regime forecaster and return a serialisable dict.
+
+        Lazily fits the model on first call. Safe to call repeatedly — the
+        prediction step is cheap. Failures are logged and return an empty dict
+        so the rest of the macro pipeline keeps running.
+        """
+        try:
+            if not self.hmm.load():
+                logger.info("HMM: no saved model — fitting on available history")
+                self.hmm.fit()
+            fc = self.hmm.predict()
+            logger.info(
+                "HMM forecast | regime={} P(dump now)={:.1%} P(dump 1d)={:.1%} P(dump 2d)={:.1%}",
+                fc.current_regime, fc.p_dump_now, fc.p_dump_1d, fc.p_dump_2d,
+            )
+            return fc.to_dict()
+        except Exception as e:
+            logger.error("HMM forecast failed: {}", e)
+            return {}
+
     def run(self):
         """Run full macro update cycle."""
         self.fetch_fred_data()
         self.fetch_news_sentiment()
         self.classify_regime()
+        self.run_hmm_forecast()
         logger.info("Macro engine update complete")

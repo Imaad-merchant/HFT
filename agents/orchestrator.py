@@ -116,6 +116,14 @@ class Orchestrator:
         except Exception as e:
             logger.error("Macro update failed: {}", e)
 
+    def run_hmm_forecast(self):
+        """HMMAgent: short-horizon dump-probability forecast."""
+        try:
+            return self.macro.run_hmm_forecast()
+        except Exception as e:
+            logger.error("HMM forecast failed: {}", e)
+            return {}
+
     def run_stat_arb_signals(self):
         """StatArbAgent: generate stat arb signals."""
         try:

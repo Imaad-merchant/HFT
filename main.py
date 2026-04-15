@@ -107,9 +107,10 @@ def main():
         "NewsSentiment"
     ))
 
-    # Every hour: macro regime + TDA + health update
+    # Every hour: macro regime + HMM forecast + TDA + health update
     schedule.every(1).hours.do(safe_run(
-        lambda: (orch.macro.classify_regime(), orch.run_tda(), orch.decay_monitor.run()),
+        lambda: (orch.macro.classify_regime(), orch.run_hmm_forecast(),
+                 orch.run_tda(), orch.decay_monitor.run()),
         "HourlyUpdate"
     ))
 
