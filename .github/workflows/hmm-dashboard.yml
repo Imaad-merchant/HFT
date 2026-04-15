@@ -66,14 +66,38 @@ jobs:
       - name: List built site contents
         run: ls -la dashboard/site/
 
+      # Always upload the built site as a regular workflow artifact so the
+      # full dashboard (HTML + PNGs + CSV + JSON) is downloadable from the
+      # Actions UI even before GitHub Pages is enabled in repo settings.
+      - name: Upload site as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hmm-dashboard-site
+          path: dashboard/site
+          retention-days: 7
+
+      # The remaining steps deploy to GitHub Pages. They are gated on Pages
+      # being enabled in Settings -> Pages -> Source: GitHub Actions. If Pages
+      # is not yet enabled, configure-pages will fail fast with a 404 — we
+      # `continue-on-error` so the workflow stays green and the regular
+      # artifact above is still available, then skip the dependent steps.
       - name: Configure GitHub Pages
+        id: configure_pages
         uses: actions/configure-pages@v5
+        continue-on-error: true
 
       - name: Upload Pages artifact
+        if: steps.configure_pages.outcome == 'success'
         uses: actions/upload-pages-artifact@v3
         with:
           path: dashboard/site
 
       - name: Deploy to GitHub Pages
         id: deployment
+        if: steps.configure_pages.outcome == 'success'
         uses: actions/deploy-pages@v4
+
+      - name: Pages setup hint
+        if: steps.configure_pages.outcome != 'success'
+        run: |
+          echo "::warning title=GitHub Pages not enabled::To make the dashboard live at https://<owner>.github.io/<repo>/, go to Settings -> Pages -> Source: GitHub Actions, then re-run this workflow. The built site is available above as the 'hmm-dashboard-site' workflow artifact."
