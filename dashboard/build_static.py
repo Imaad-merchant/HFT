@@ -31,6 +31,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from data.fetcher import DataFetcher  # noqa: E402
 from macro.macro import MacroEngine  # noqa: E402
 from macro.hmm_regime import HMMRegimeDetector, DEFAULT_PRIMARIES  # noqa: E402
+from dashboard.brochure import make_brochure  # noqa: E402
 
 DEFAULT_OUT_DIR = Path(__file__).parent / "site"
 DEFAULT_DAYS = 30
@@ -55,7 +56,7 @@ def _fmt_first_passage(d: float | None) -> str:
     return f"~{d:.1f}d"
 
 
-def _render_index_html(payload: dict, days: int) -> str:
+def _render_index_html(payload: dict, days: int, brochure: bool = False) -> str:
     forecasts: dict[str, dict] = payload["forecasts"]
 
     rows: list[str] = []
@@ -76,6 +77,14 @@ def _render_index_html(payload: dict, days: int) -> str:
             f'<td>{_fmt_signed_pct(fc["expected_1d_return"])}</td>'
             f'<td>{_fmt_first_passage(fc.get("expected_first_dump_days"))}</td>'
             "</tr>"
+        )
+
+    brochure_block = ""
+    if brochure:
+        brochure_block = (
+            '<section class="brochure">'
+            '  <img src="brochure.png" alt="ARIA HMM regime brochure">'
+            "</section>"
         )
 
     chart_blocks: list[str] = []
@@ -124,6 +133,9 @@ def _render_index_html(payload: dict, days: int) -> str:
     .regime-normal {{ background: #3a3416; color: #f5d76e; }}
     .regime-bear   {{ background: #3d2718; color: #f0a060; }}
     .regime-crash  {{ background: #3a181a; color: #ff6b6b; }}
+    section.brochure {{ margin: 0 0 24px 0; }}
+    section.brochure img {{ width: 100%; height: auto; display: block;
+                            border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.4); }}
     section.chart {{ margin: 16px 0; padding: 14px; background: #161b22;
                      border-radius: 8px; }}
     section.chart h2 {{ margin: 0 0 10px 0; font-weight: 600; color: #e7eaee;
@@ -141,6 +153,7 @@ def _render_index_html(payload: dict, days: int) -> str:
     <h1>ARIA HMM Regime Forecast</h1>
     <p>Generated {payload['generated_at']} &middot; horizon {days} trading days</p>
   </header>
+  {brochure_block}
   <div class="table-wrap">
     <table>
       <thead>
@@ -206,6 +219,7 @@ def build(
 
     # 3. Fit + predict + render per asset
     forecasts: dict[str, dict] = {}
+    fitted_detectors: list[HMMRegimeDetector] = []
     for asset in assets:
         try:
             det = HMMRegimeDetector(primary_asset=asset)
@@ -216,6 +230,7 @@ def build(
             payload["expected_first_dump_days"] = det.expected_first_passage_to_dump()
             forecasts[asset] = payload
             det.plot_forecast(n_days=days, output_dir=out_dir)
+            fitted_detectors.append(det)
             logger.info(
                 "HMM[{}] | regime={} P(now)={:.1%} P(1d)={:.1%} P(2d)={:.1%}",
                 asset, fc.current_regime, fc.p_dump_now, fc.p_dump_1d, fc.p_dump_2d,
@@ -224,13 +239,22 @@ def build(
             logger.error("HMM[{}] failed: {}", asset, e)
             forecasts[asset] = {"error": str(e)}
 
-    # 4. Write index.html and forecast.json
+    # 4. Render brochure (single composite portrait PNG combining all assets)
+    brochure_built = False
+    if fitted_detectors:
+        try:
+            make_brochure(fitted_detectors, out_dir / "brochure.png", n_days=days)
+            brochure_built = True
+        except Exception as e:
+            logger.warning("Brochure render failed: {}", e)
+
+    # 5. Write index.html and forecast.json
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "horizon_days": days,
         "forecasts": forecasts,
     }
-    (out_dir / "index.html").write_text(_render_index_html(payload, days))
+    (out_dir / "index.html").write_text(_render_index_html(payload, days, brochure=brochure_built))
     (out_dir / "forecast.json").write_text(json.dumps(payload, indent=2, default=str))
 
     logger.info("Static site built at {}", out_dir)
