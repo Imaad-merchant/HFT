@@ -41,7 +41,7 @@ class DataFetcher:
         con.close()
         logger.info("DuckDB initialized at {}", self.db_path)
 
-    def _get_latest_timestamp(self, asset_label: str) -> datetime | None:
+    def _get_latest_timestamp(self, asset_label: str):
         """Get the most recent timestamp for an asset in the DB."""
         con = duckdb.connect(self.db_path)
         result = con.execute(
@@ -50,16 +50,29 @@ class DataFetcher:
         con.close()
         return result[0] if result and result[0] else None
 
-    def fetch_asset(self, ticker: str, period: str = "2y", interval: str = "1m"):
+    def fetch_asset(self, ticker: str, period: str = "2y", interval: str = "1h"):
         """Fetch OHLCV data for a single asset and upsert into DuckDB."""
         label = ASSET_LABELS.get(ticker, ticker)
         logger.info("Fetching {} ({})", ticker, label)
 
         try:
-            # yfinance limits 1m data to 7 days; use 5m for longer periods
-            if interval == "1m" and period not in ("1d", "5d", "7d"):
+            # yfinance intraday limits: 1m=7d, 5m=60d, 1h=730d, 1d=unlimited
+            # Auto-select best interval for the requested period
+            period_days = {"1d": 1, "5d": 5, "7d": 7, "1mo": 30, "3mo": 90,
+                           "6mo": 180, "1y": 365, "2y": 730, "5y": 1825, "max": 9999}
+            days = period_days.get(period, 730)
+
+            if days <= 7:
                 effective_interval = "5m"
+            elif days <= 60:
+                effective_interval = "5m"
+            elif days <= 730:
+                effective_interval = "1h"
             else:
+                effective_interval = "1d"
+
+            # Override if caller explicitly set a valid interval
+            if interval in ("1d", "1h", "5m") and interval != "1m":
                 effective_interval = interval
 
             data = yf.download(
@@ -118,12 +131,12 @@ class DataFetcher:
         """Incremental refresh — fetch last 7 days of data."""
         total = 0
         for ticker in ASSETS:
-            total += self.fetch_asset(ticker, period="7d", interval="1m")
+            total += self.fetch_asset(ticker, period="7d", interval="5m")
         logger.info("Refresh complete: {} bars updated", total)
         return total
 
     def fill_gaps(self):
-        """Forward-fill gaps in the OHLCV data."""
+        """Forward-fill NaN values in OHLCV data without reindexing."""
         con = duckdb.connect(self.db_path)
         for label in ASSET_LABELS.values():
             df = con.execute(
@@ -133,14 +146,17 @@ class DataFetcher:
             if df.empty:
                 continue
 
-            df = df.set_index("timestamp").asfreq("5min")
-            df["asset"] = label
+            # Just forward-fill NaN prices, don't reindex (preserves natural timestamps)
+            before = df[["open", "high", "low", "close"]].isna().sum().sum()
             df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]].ffill()
             df["volume"] = df["volume"].fillna(0).astype(int)
-            df = df.dropna(subset=["open"]).reset_index()
+            df = df.dropna(subset=["open"])
+            after = before - df[["open", "high", "low", "close"]].isna().sum().sum()
 
-            con.execute("DELETE FROM ohlcv WHERE asset = ?", [label])
-            con.execute("INSERT INTO ohlcv SELECT * FROM df")
+            if after > 0:
+                con.execute("DELETE FROM ohlcv WHERE asset = ?", [label])
+                con.execute("INSERT INTO ohlcv SELECT * FROM df")
+                logger.info("Filled {} NaN values for {}", after, label)
 
         con.close()
         logger.info("Gap filling complete")
@@ -161,7 +177,7 @@ class DataFetcher:
         con.close()
         return df
 
-    def get_all_assets(self) -> list[str]:
+    def get_all_assets(self):
         """Return list of all assets in the database."""
         con = duckdb.connect(self.db_path)
         result = con.execute("SELECT DISTINCT asset FROM ohlcv").fetchall()

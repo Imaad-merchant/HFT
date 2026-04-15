@@ -382,7 +382,7 @@ class EvolutionarySearcher:
 
         logger.info("Evolution complete. {} viable genomes saved.", sum(1 for g in top_genomes if g.fitness > -np.inf))
 
-    def get_best_genome(self) -> Genome | None:
+    def get_best_genome(self):
         """Retrieve the best evolved genome from DB."""
         con = duckdb.connect(self.db_path)
         row = con.execute("""

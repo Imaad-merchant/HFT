@@ -160,7 +160,7 @@ class Orchestrator:
 
     # --- Signal fusion and decision making ---
 
-    def _get_rl_signals(self) -> dict[str, float]:
+    def _get_rl_signals(self):
         """Get signals from the RL agent."""
         signals = {}
         try:
@@ -177,7 +177,7 @@ class Orchestrator:
 
         return signals
 
-    def _get_evo_signals(self) -> dict[str, float]:
+    def _get_evo_signals(self):
         """Get signals from the best evolved genome."""
         signals = {}
         try:
@@ -195,7 +195,7 @@ class Orchestrator:
 
         return signals
 
-    def _get_stat_arb_signals(self) -> dict[str, float]:
+    def _get_stat_arb_signals(self):
         """Convert stat arb pair signals to per-asset signals."""
         signals = {}
         try:
@@ -214,7 +214,7 @@ class Orchestrator:
 
         return signals
 
-    def fuse_signals(self) -> dict[str, float]:
+    def fuse_signals(self):
         """Combine all signal sources weighted by their rolling Sharpe."""
         allocations = self.decay_monitor.get_strategy_allocations()
 
@@ -283,7 +283,7 @@ class Orchestrator:
 
         return fused
 
-    def apply_risk_gate(self, target_positions: dict[str, float]) -> dict[str, float]:
+    def apply_risk_gate(self, target_positions: dict[str, float]):
         """Apply hard risk limits to target positions."""
         # Max per-asset position
         for asset in target_positions:

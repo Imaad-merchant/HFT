@@ -112,7 +112,7 @@ class AlphaDecayMonitor:
 
         return health
 
-    def monitor_stat_arb(self) -> list[dict]:
+    def monitor_stat_arb(self):
         """Monitor all stat arb pairs."""
         con = duckdb.connect(self.db_path)
         pairs = con.execute("SELECT * FROM pairs WHERE status = 'ACTIVE'").fetchdf()
@@ -143,7 +143,7 @@ class AlphaDecayMonitor:
         con.close()
         return results
 
-    def monitor_evolved_strategies(self) -> list[dict]:
+    def monitor_evolved_strategies(self):
         """Monitor evolved genome strategies."""
         con = duckdb.connect(self.db_path)
         genomes = con.execute("""
@@ -186,7 +186,7 @@ class AlphaDecayMonitor:
             "win_rate": 0.0, "profit_factor": 0.0,
         }
 
-    def check_and_act(self) -> list[dict]:
+    def check_and_act(self):
         """Run health checks and take automated actions."""
         actions = []
 
@@ -288,7 +288,7 @@ class AlphaDecayMonitor:
 
         return actions
 
-    def get_strategy_allocations(self) -> dict[str, float]:
+    def get_strategy_allocations(self):
         """Get current allocation percentages for all strategies."""
         con = duckdb.connect(self.db_path)
         df = con.execute("""

@@ -239,7 +239,7 @@ class RLAgent:
             return row[0]
         return 0
 
-    def get_training_history(self) -> list[dict]:
+    def get_training_history(self):
         """Get all training/eval history."""
         con = duckdb.connect(self.db_path)
         df = con.execute("SELECT * FROM retraining_log ORDER BY version").fetchdf()

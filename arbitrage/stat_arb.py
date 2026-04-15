@@ -94,13 +94,15 @@ class StatArbEngine:
         con = duckdb.connect(self.db_path)
         assets = [r[0] for r in con.execute("SELECT DISTINCT asset FROM ohlcv").fetchall()]
 
-        # Get close prices for all assets
+        # Get close prices for all assets, rounded to nearest hour for alignment
         closes = {}
         for asset in assets:
             df = con.execute(
                 "SELECT timestamp, close FROM ohlcv WHERE asset = ? ORDER BY timestamp", [asset]
             ).fetchdf()
             if not df.empty:
+                df["timestamp"] = df["timestamp"].dt.floor("h")
+                df = df.groupby("timestamp").last().reset_index()
                 closes[asset] = df.set_index("timestamp")["close"]
         con.close()
 
@@ -108,10 +110,12 @@ class StatArbEngine:
             logger.warning("Not enough assets for pair discovery")
             return
 
-        # Align all series
-        close_df = pd.DataFrame(closes).dropna()
+        # Align all series using outer join then forward-fill
+        close_df = pd.DataFrame(closes)
+        close_df = close_df.ffill().dropna()
+        logger.info("Aligned {} timestamps across {} assets for pair discovery", len(close_df), len(closes))
         if len(close_df) < 100:
-            logger.warning("Not enough aligned data for pair discovery")
+            logger.warning("Not enough aligned data for pair discovery ({} rows)", len(close_df))
             return
 
         found_pairs = []
@@ -157,21 +161,25 @@ class StatArbEngine:
                 con.execute("DELETE FROM pairs WHERE asset1 = ? AND asset2 = ?",
                             [pair["asset1"], pair["asset2"]])
                 df = pd.DataFrame([pair])
-                con.execute("INSERT INTO pairs SELECT * FROM df")
+                con.execute("""
+                    INSERT INTO pairs (asset1, asset2, hedge_ratio, half_life, adf_pvalue,
+                                       coint_pvalue, status, last_tested)
+                    SELECT * FROM df
+                """)
             con.execute("COMMIT")
             con.close()
             logger.info("Discovered {} cointegrated pairs", len(found_pairs))
         else:
             logger.info("No cointegrated pairs found")
 
-    def get_active_pairs(self) -> list[dict]:
+    def get_active_pairs(self):
         """Get all active pairs from DB."""
         con = duckdb.connect(self.db_path)
         df = con.execute("SELECT * FROM pairs WHERE status = 'ACTIVE'").fetchdf()
         con.close()
         return df.to_dict("records")
 
-    def compute_spread_z(self, asset1: str, asset2: str, hedge_ratio: float, lookback: int = 200) -> float | None:
+    def compute_spread_z(self, asset1: str, asset2: str, hedge_ratio: float, lookback: int = 200):
         """Compute current normalized spread z-score for a pair."""
         con = duckdb.connect(self.db_path)
         df1 = con.execute(
@@ -195,7 +203,7 @@ class StatArbEngine:
         z = (spread.iloc[-1] - spread.mean()) / (spread.std() + 1e-10)
         return float(z)
 
-    def generate_signals(self) -> list[dict]:
+    def generate_signals(self):
         """Generate entry/exit/stop signals for all active pairs."""
         pairs = self.get_active_pairs()
         signals = []
@@ -330,7 +338,7 @@ class StatArbEngine:
         regime = "BREAKDOWN" if len(breakdowns) > 3 else "NORMAL"
         return {"breakdowns": breakdowns, "regime": regime}
 
-    def get_all_spread_zscores(self) -> dict[str, float]:
+    def get_all_spread_zscores(self):
         """Get spread z-scores for all active pairs."""
         pairs = self.get_active_pairs()
         z_scores = {}

@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARIA Trading Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d1117;--card:#161b22;--card-hover:#1c2129;--border:#30363d;
+    --text:#e6edf3;--text-dim:#8b949e;--text-muted:#484f58;
+    --blue:#2196F3;--blue-dim:#1a78c2;--green:#00c853;--green-dim:#00a844;
+    --red:#ff1744;--red-dim:#d50032;--yellow:#ffab00;--cyan:#00bcd4;
+    --purple:#bb86fc;
+  }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+    background:var(--bg);color:var(--text);line-height:1.5;
+    min-height:100vh;overflow-x:hidden;
+  }
+  /* Header */
+  .header{
+    background:linear-gradient(135deg,#0d1117 0%,#161b22 100%);
+    border-bottom:1px solid var(--border);
+    padding:20px 32px;display:flex;align-items:center;justify-content:space-between;
+    position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);
+  }
+  .header-left{display:flex;align-items:center;gap:16px}
+  .logo{
+    font-size:28px;font-weight:800;letter-spacing:2px;
+    background:linear-gradient(135deg,var(--blue),var(--cyan));
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  }
+  .tagline{font-size:13px;color:var(--text-dim);letter-spacing:0.5px;margin-top:2px}
+  .header-right{display:flex;align-items:center;gap:20px}
+  .status-badge{
+    display:flex;align-items:center;gap:8px;
+    background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);
+    padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;
+  }
+  .status-dot{
+    width:8px;height:8px;border-radius:50%;background:var(--green);
+    animation:pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  .clock{font-size:14px;color:var(--text-dim);font-variant-numeric:tabular-nums}
+
+  /* Main layout */
+  .main{padding:24px 32px;max-width:1600px;margin:0 auto}
+
+  /* Metric cards */
+  .metrics-grid{
+    display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-bottom:24px;
+  }
+  .metric-card{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:20px;transition:all 0.2s ease;position:relative;overflow:hidden;
+  }
+  .metric-card:hover{border-color:var(--blue);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,0.3)}
+  .metric-card::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:3px;
+    border-radius:12px 12px 0 0;
+  }
+  .metric-card.positive::before{background:linear-gradient(90deg,var(--green),var(--green-dim))}
+  .metric-card.negative::before{background:linear-gradient(90deg,var(--red),var(--red-dim))}
+  .metric-card.neutral::before{background:linear-gradient(90deg,var(--blue),var(--cyan))}
+  .metric-label{font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+  .metric-value{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+  .metric-value.positive{color:var(--green)}
+  .metric-value.negative{color:var(--red)}
+  .metric-value.neutral{color:var(--text)}
+  .metric-sub{font-size:11px;color:var(--text-muted);margin-top:4px}
+
+  /* Section headers */
+  .section-title{
+    font-size:16px;font-weight:600;color:var(--text);margin-bottom:16px;
+    display:flex;align-items:center;gap:10px;
+  }
+  .section-title::before{
+    content:'';width:4px;height:20px;background:var(--blue);border-radius:2px;
+  }
+
+  /* Chart section */
+  .chart-section{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:24px;margin-bottom:24px;
+  }
+  .chart-container{position:relative;height:380px;width:100%}
+
+  /* Two-column layout */
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px}
+  .three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:24px}
+
+  /* Panel */
+  .panel{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;
+  }
+
+  /* Assets table */
+  .assets-table{width:100%;border-collapse:collapse}
+  .assets-table th{
+    text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;
+    color:var(--text-muted);padding:10px 12px;border-bottom:1px solid var(--border);
+  }
+  .assets-table td{
+    padding:10px 12px;font-size:13px;border-bottom:1px solid rgba(48,54,61,0.5);
+    font-variant-numeric:tabular-nums;
+  }
+  .assets-table tr:hover td{background:rgba(33,150,243,0.04)}
+  .asset-symbol{font-weight:600;color:var(--blue)}
+  .asset-type{
+    display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;
+    font-weight:500;text-transform:uppercase;letter-spacing:0.5px;
+  }
+  .asset-type.futures{background:rgba(187,134,252,0.15);color:var(--purple)}
+  .asset-type.etf{background:rgba(0,188,212,0.15);color:var(--cyan)}
+  .asset-type.index{background:rgba(255,171,0,0.15);color:var(--yellow)}
+
+  /* Heatmap */
+  .heatmap-table{width:100%;border-collapse:separate;border-spacing:3px}
+  .heatmap-table th{
+    font-size:11px;text-transform:uppercase;letter-spacing:0.5px;
+    color:var(--text-muted);padding:6px 4px;text-align:center;
+  }
+  .heatmap-table td{
+    text-align:center;padding:8px 4px;border-radius:6px;font-size:12px;
+    font-weight:600;font-variant-numeric:tabular-nums;
+    transition:transform 0.15s ease;
+  }
+  .heatmap-table td:hover{transform:scale(1.1)}
+  .heatmap-table td.year-label{
+    color:var(--text-dim);font-weight:700;font-size:13px;text-align:left;
+    background:none !important;
+  }
+
+  /* Strategy cards */
+  .strategy-item{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 0;border-bottom:1px solid rgba(48,54,61,0.5);
+  }
+  .strategy-item:last-child{border-bottom:none}
+  .strategy-info{display:flex;align-items:center;gap:12px}
+  .strategy-dot{width:10px;height:10px;border-radius:50%}
+  .strategy-name{font-size:14px;font-weight:500}
+  .strategy-weight{font-size:13px;color:var(--text-dim)}
+  .strategy-status{
+    padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;
+    text-transform:uppercase;letter-spacing:0.5px;
+  }
+  .strategy-status.active{background:rgba(0,200,83,0.12);color:var(--green)}
+  .strategy-status.monitoring{background:rgba(255,171,0,0.12);color:var(--yellow)}
+
+  /* System status */
+  .sys-row{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:10px 0;border-bottom:1px solid rgba(48,54,61,0.4);
+    font-size:13px;
+  }
+  .sys-row:last-child{border-bottom:none}
+  .sys-label{color:var(--text-dim)}
+  .sys-value{font-weight:500;font-variant-numeric:tabular-nums}
+  .sys-value.highlight{color:var(--blue)}
+  .sys-value.warn{color:var(--yellow)}
+  .sys-value.ok{color:var(--green)}
+
+  /* Footer */
+  .footer{
+    text-align:center;padding:24px;font-size:12px;color:var(--text-muted);
+    border-top:1px solid var(--border);margin-top:16px;
+  }
+
+  /* Responsive */
+  @media(max-width:1200px){
+    .metrics-grid{grid-template-columns:repeat(3,1fr)}
+    .three-col{grid-template-columns:1fr}
+  }
+  @media(max-width:900px){
+    .metrics-grid{grid-template-columns:repeat(2,1fr)}
+    .two-col{grid-template-columns:1fr}
+    .header{padding:16px 20px;flex-direction:column;gap:12px}
+    .main{padding:16px 20px}
+  }
+  @media(max-width:500px){
+    .metrics-grid{grid-template-columns:1fr}
+  }
+
+  /* Loading */
+  .loading-overlay{
+    display:flex;align-items:center;justify-content:center;
+    height:100%;color:var(--text-dim);font-size:14px;
+  }
+  .spinner{
+    width:24px;height:24px;border:3px solid var(--border);
+    border-top-color:var(--blue);border-radius:50%;
+    animation:spin 0.8s linear infinite;margin-right:12px;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <div>
+      <div class="logo">ARIA</div>
+      <div class="tagline">Adaptive Reinforcement Intelligence for Alpha</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-badge">
+      <span class="status-dot"></span>
+      <span>LIVE MONITORING</span>
+    </div>
+    <div class="clock" id="clock"></div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Key Metrics -->
+  <div class="metrics-grid">
+    <div class="metric-card negative">
+      <div class="metric-label">Total Return</div>
+      <div class="metric-value negative">-4.54%</div>
+      <div class="metric-sub">Nov 2024 - Apr 2026</div>
+    </div>
+    <div class="metric-card negative">
+      <div class="metric-label">Sharpe Ratio</div>
+      <div class="metric-value negative">-0.695</div>
+      <div class="metric-sub">Risk-adjusted return</div>
+    </div>
+    <div class="metric-card negative">
+      <div class="metric-label">Max Drawdown</div>
+      <div class="metric-value negative">-6.03%</div>
+      <div class="metric-sub">Peak-to-trough</div>
+    </div>
+    <div class="metric-card neutral">
+      <div class="metric-label">Win Rate</div>
+      <div class="metric-value neutral">47.1%</div>
+      <div class="metric-sub">Winning trades</div>
+    </div>
+    <div class="metric-card negative">
+      <div class="metric-label">Profit Factor</div>
+      <div class="metric-value negative">0.94</div>
+      <div class="metric-sub">Gross profit / loss</div>
+    </div>
+    <div class="metric-card neutral">
+      <div class="metric-label">Total Trades</div>
+      <div class="metric-value neutral">9,940</div>
+      <div class="metric-sub">~19 trades / day</div>
+    </div>
+  </div>
+
+  <!-- Equity Curve -->
+  <div class="chart-section">
+    <div class="section-title">Equity Curve</div>
+    <div class="chart-container">
+      <div class="loading-overlay" id="chart-loading">
+        <div class="spinner"></div>
+        Loading equity data...
+      </div>
+      <canvas id="equityChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Assets + Monthly Returns -->
+  <div class="two-col">
+    <!-- Assets Being Traded -->
+    <div class="panel">
+      <div class="section-title">Assets Being Traded</div>
+      <table class="assets-table">
+        <thead>
+          <tr><th>Symbol</th><th>Name</th><th>Type</th><th>Exchange</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="asset-symbol">ES=F</td>
+            <td>S&amp;P 500 E-mini</td>
+            <td><span class="asset-type futures">Futures</span></td>
+            <td>CME</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">NQ=F</td>
+            <td>Nasdaq 100 E-mini</td>
+            <td><span class="asset-type futures">Futures</span></td>
+            <td>CME</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">GC=F</td>
+            <td>Gold</td>
+            <td><span class="asset-type futures">Futures</span></td>
+            <td>COMEX</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">CL=F</td>
+            <td>Crude Oil</td>
+            <td><span class="asset-type futures">Futures</span></td>
+            <td>NYMEX</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">ZN=F</td>
+            <td>10-Year Treasury Note</td>
+            <td><span class="asset-type futures">Futures</span></td>
+            <td>CBOT</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">TLT</td>
+            <td>20+ Year Treasury</td>
+            <td><span class="asset-type etf">ETF</span></td>
+            <td>NYSE</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">SPY</td>
+            <td>S&amp;P 500 ETF</td>
+            <td><span class="asset-type etf">ETF</span></td>
+            <td>NYSE</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">DXY</td>
+            <td>US Dollar Index</td>
+            <td><span class="asset-type index">Index</span></td>
+            <td>ICE</td>
+          </tr>
+          <tr>
+            <td class="asset-symbol">VIX</td>
+            <td>Volatility Index</td>
+            <td><span class="asset-type index">Index</span></td>
+            <td>CBOE</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Monthly Returns Heatmap -->
+    <div class="panel">
+      <div class="section-title">Monthly Returns Heatmap</div>
+      <table class="heatmap-table" id="heatmapTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th>
+            <th>May</th><th>Jun</th><th>Jul</th><th>Aug</th>
+            <th>Sep</th><th>Oct</th><th>Nov</th><th>Dec</th>
+          </tr>
+        </thead>
+        <tbody id="heatmapBody"></tbody>
+      </table>
+      <div style="margin-top:16px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;color:var(--text-muted)">
+        <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:#b71c1c"></span> Loss
+        <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:rgba(48,54,61,0.6);margin-left:8px"></span> Flat
+        <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:#1b5e20;margin-left:8px"></span> Gain
+      </div>
+    </div>
+  </div>
+
+  <!-- Strategy Status + System Status -->
+  <div class="two-col">
+    <!-- Strategy Status -->
+    <div class="panel">
+      <div class="section-title">Strategy Allocation</div>
+      <div class="strategy-item">
+        <div class="strategy-info">
+          <div class="strategy-dot" style="background:var(--blue)"></div>
+          <div>
+            <div class="strategy-name">Momentum</div>
+            <div class="strategy-weight">Trend-following signals across timeframes</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:18px;font-weight:700;color:var(--blue)">25%</div>
+          <div class="strategy-status active">Active</div>
+        </div>
+      </div>
+      <div class="strategy-item">
+        <div class="strategy-info">
+          <div class="strategy-dot" style="background:var(--purple)"></div>
+          <div>
+            <div class="strategy-name">Mean Reversion</div>
+            <div class="strategy-weight">Statistical reversion to fair value</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:18px;font-weight:700;color:var(--purple)">20%</div>
+          <div class="strategy-status active">Active</div>
+        </div>
+      </div>
+      <div class="strategy-item">
+        <div class="strategy-info">
+          <div class="strategy-dot" style="background:var(--cyan)"></div>
+          <div>
+            <div class="strategy-name">Breakout</div>
+            <div class="strategy-weight">Volatility expansion and range breaks</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:18px;font-weight:700;color:var(--cyan)">20%</div>
+          <div class="strategy-status active">Active</div>
+        </div>
+      </div>
+      <div class="strategy-item">
+        <div class="strategy-info">
+          <div class="strategy-dot" style="background:var(--green)"></div>
+          <div>
+            <div class="strategy-name">Feature-Based</div>
+            <div class="strategy-weight">ML-driven feature importance signals</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:18px;font-weight:700;color:var(--green)">35%</div>
+          <div class="strategy-status active">Active</div>
+        </div>
+      </div>
+      <div class="strategy-item">
+        <div class="strategy-info">
+          <div class="strategy-dot" style="background:var(--yellow)"></div>
+          <div>
+            <div class="strategy-name">Cross-Asset Overlay</div>
+            <div class="strategy-weight">Inter-market correlation and regime filter</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:18px;font-weight:700;color:var(--yellow)">--</div>
+          <div class="strategy-status monitoring">Overlay</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Status -->
+    <div class="panel">
+      <div class="section-title">System Status</div>
+      <div class="sys-row">
+        <span class="sys-label">Data Coverage</span>
+        <span class="sys-value ok">2 years hourly bars</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Data Period</span>
+        <span class="sys-value highlight">Nov 15, 2024 - Apr 15, 2026</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Macro Regime</span>
+        <span class="sys-value warn">NEUTRAL</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Active Stat Arb Pairs</span>
+        <span class="sys-value">0</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Model Version</span>
+        <span class="sys-value">v0 (untrained)</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Starting Capital</span>
+        <span class="sys-value highlight">$1,000,000</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Current Equity</span>
+        <span class="sys-value" style="color:var(--red)">$954,593</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Total Bars Processed</span>
+        <span class="sys-value">7,834</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Next Evolution</span>
+        <span class="sys-value highlight">Sunday 8:00 PM ET</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-label">Next RL Retrain</span>
+        <span class="sys-value highlight">Sunday 10:00 PM ET</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  ARIA v0 &mdash; Adaptive Reinforcement Intelligence for Alpha &mdash; All data from backtest simulation &mdash; Not financial advice
+</div>
+
+<script>
+// Clock
+function updateClock() {
+  const now = new Date();
+  const opts = { weekday:'short', year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false, timeZoneName:'short' };
+  document.getElementById('clock').textContent = now.toLocaleString('en-US', opts);
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// Monthly returns data (pre-computed from equity_curve.csv)
+const monthlyReturns = {
+  2024: { 11: -0.45, 12: -0.67 },
+  2025: { 1: 0.39, 2: -0.72, 3: -1.18, 4: 1.05, 5: -1.34, 6: -0.09, 7: -0.59, 8: -0.13, 9: -0.14, 10: -0.08, 11: 0.09, 12: -1.35 },
+  2026: { 1: 0.13, 2: -0.95, 3: 1.32, 4: -0.10 }
+};
+
+function getHeatColor(val) {
+  if (val === null || val === undefined) return 'transparent';
+  const absVal = Math.abs(val);
+  const intensity = Math.min(absVal / 1.5, 1);
+  if (val > 0.02) {
+    const r = Math.round(20 + (27 - 20) * (1 - intensity));
+    const g = Math.round(60 + (94 - 60) * intensity);
+    const b = Math.round(20 + (32 - 20) * (1 - intensity));
+    return `rgba(${r},${g},${b},${0.5 + intensity * 0.5})`;
+  } else if (val < -0.02) {
+    const r = Math.round(120 + (183 - 120) * intensity);
+    const g = Math.round(20 + (28 - 20) * (1 - intensity));
+    const b = Math.round(20 + (28 - 20) * (1 - intensity));
+    return `rgba(${r},${g},${b},${0.5 + intensity * 0.5})`;
+  }
+  return 'rgba(48,54,61,0.6)';
+}
+
+// Build heatmap
+const heatmapBody = document.getElementById('heatmapBody');
+[2024, 2025, 2026].forEach(year => {
+  const tr = document.createElement('tr');
+  const yearTd = document.createElement('td');
+  yearTd.className = 'year-label';
+  yearTd.textContent = year;
+  tr.appendChild(yearTd);
+  for (let m = 1; m <= 12; m++) {
+    const td = document.createElement('td');
+    const val = monthlyReturns[year]?.[m];
+    if (val !== undefined) {
+      td.textContent = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+      td.style.background = getHeatColor(val);
+      td.style.color = val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : 'var(--text-dim)';
+    } else {
+      td.textContent = '--';
+      td.style.color = 'var(--text-muted)';
+      td.style.background = 'transparent';
+    }
+    tr.appendChild(td);
+  }
+  heatmapBody.appendChild(tr);
+});
+
+// Equity Chart
+async function loadEquityCurve() {
+  const loadingEl = document.getElementById('chart-loading');
+  try {
+    const response = await fetch('backtest_results/equity_curve.csv');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    const lines = text.trim().split('\n');
+
+    const timestamps = [];
+    const equities = [];
+    const pnls = [];
+
+    // Downsample: take every Nth point for performance
+    const totalPoints = lines.length - 1;
+    const maxPoints = 800;
+    const step = Math.max(1, Math.floor(totalPoints / maxPoints));
+
+    for (let i = 1; i < lines.length; i += step) {
+      const parts = lines[i].split(',');
+      if (parts.length < 3) continue;
+      timestamps.push(parts[0]);
+      equities.push(parseFloat(parts[1]));
+      pnls.push(parseFloat(parts[2]));
+    }
+    // Always include last point
+    const lastParts = lines[lines.length - 1].split(',');
+    if (lastParts.length >= 3) {
+      timestamps.push(lastParts[0]);
+      equities.push(parseFloat(lastParts[1]));
+      pnls.push(parseFloat(lastParts[2]));
+    }
+
+    loadingEl.style.display = 'none';
+    renderChart(timestamps, equities);
+  } catch (err) {
+    loadingEl.innerHTML = `
+      <div style="text-align:center">
+        <div style="font-size:16px;margin-bottom:8px;color:var(--red)">Unable to load equity data</div>
+        <div style="font-size:12px;color:var(--text-muted)">
+          Serve from the aria directory:<br>
+          <code style="background:var(--bg);padding:4px 8px;border-radius:4px;margin-top:4px;display:inline-block">
+            cd /Users/imaadmerchant/aria && python3 -m http.server 8000
+          </code>
+          <br>then open <code style="background:var(--bg);padding:2px 6px;border-radius:4px">http://localhost:8000/dashboard/</code>
+        </div>
+      </div>`;
+  }
+}
+
+function renderChart(timestamps, equities) {
+  const ctx = document.getElementById('equityChart').getContext('2d');
+
+  // Create gradient
+  const gradient = ctx.createLinearGradient(0, 0, 0, 380);
+  gradient.addColorStop(0, 'rgba(33,150,243,0.25)');
+  gradient.addColorStop(0.5, 'rgba(33,150,243,0.08)');
+  gradient.addColorStop(1, 'rgba(33,150,243,0)');
+
+  // Baseline at $1M for coloring
+  const baseline = 1000000;
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: timestamps,
+      datasets: [{
+        label: 'Equity',
+        data: equities,
+        borderColor: function(context) {
+          const chart = context.chart;
+          const {ctx: c, chartArea} = chart;
+          if (!chartArea) return '#2196F3';
+          const grad = c.createLinearGradient(chartArea.left, 0, chartArea.right, 0);
+          // Color based on performance
+          const vals = context.dataset.data;
+          for (let i = 0; i < vals.length; i++) {
+            const pos = i / (vals.length - 1);
+            grad.addColorStop(pos, vals[i] >= baseline ? '#00c853' : '#ff1744');
+          }
+          return grad;
+        },
+        borderWidth: 2,
+        fill: true,
+        backgroundColor: gradient,
+        pointRadius: 0,
+        pointHitRadius: 8,
+        tension: 0.1,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1c2129',
+          titleColor: '#e6edf3',
+          bodyColor: '#e6edf3',
+          borderColor: '#30363d',
+          borderWidth: 1,
+          cornerRadius: 8,
+          padding: 12,
+          titleFont: { size: 12, weight: '400' },
+          bodyFont: { size: 14, weight: '600', family: 'monospace' },
+          displayColors: false,
+          callbacks: {
+            title: function(items) {
+              return items[0].label;
+            },
+            label: function(item) {
+              const val = item.parsed.y;
+              const ret = ((val - 1000000) / 1000000 * 100).toFixed(2);
+              const sign = ret >= 0 ? '+' : '';
+              return `$${val.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})}  (${sign}${ret}%)`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'category',
+          ticks: {
+            color: '#484f58',
+            maxTicksLimit: 12,
+            maxRotation: 0,
+            font: { size: 11 },
+            callback: function(value, index) {
+              const label = this.getLabelForValue(value);
+              // Show only YYYY-MM
+              return label ? label.substring(0, 7) : '';
+            }
+          },
+          grid: {
+            color: 'rgba(48,54,61,0.3)',
+            drawTicks: false,
+          },
+          border: { color: 'var(--border)' }
+        },
+        y: {
+          ticks: {
+            color: '#484f58',
+            font: { size: 11, family: 'monospace' },
+            callback: function(value) {
+              return '$' + (value / 1000).toFixed(0) + 'k';
+            }
+          },
+          grid: {
+            color: 'rgba(48,54,61,0.3)',
+            drawTicks: false,
+          },
+          border: { color: 'var(--border)' }
+        }
+      }
+    }
+  });
+}
+
+// Annotation line at $1M baseline
+function addBaselineLine(chart) {
+  // Using annotation plugin if available, otherwise skip
+}
+
+loadEquityCurve();
+</script>
+
+</body>
+</html>

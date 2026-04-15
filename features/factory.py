@@ -45,7 +45,7 @@ class FeatureFactory:
         """)
         con.close()
 
-    def _compute_price_features(self, df: pd.DataFrame) -> dict[str, pd.Series]:
+    def _compute_price_features(self, df: pd.DataFrame):
         """Compute price-based features."""
         features = {}
         close = df["close"]
@@ -82,7 +82,7 @@ class FeatureFactory:
 
         return features
 
-    def _compute_volume_features(self, df: pd.DataFrame) -> dict[str, pd.Series]:
+    def _compute_volume_features(self, df: pd.DataFrame):
         """Compute volume-based features."""
         features = {}
         volume = df["volume"].astype(float)
@@ -109,7 +109,7 @@ class FeatureFactory:
 
         return features
 
-    def _compute_regime_features(self, df: pd.DataFrame) -> dict[str, pd.Series]:
+    def _compute_regime_features(self, df: pd.DataFrame):
         """Compute regime indicator features."""
         features = {}
         close = df["close"]
@@ -164,7 +164,7 @@ class FeatureFactory:
 
         return result
 
-    def compute_cross_asset_features(self, all_data: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    def compute_cross_asset_features(self, all_data: dict[str, pd.DataFrame]):
         """Compute cross-asset features (correlations, betas, spreads)."""
         # Align all assets by timestamp
         closes = {}
@@ -262,20 +262,23 @@ class FeatureFactory:
                     aligned = series.reindex(all_data[asset].set_index("timestamp").index)
                     feature_frames[asset][fname] = aligned.values
 
-        # Store features as JSON blobs in wide format
+        # Store features as JSON blobs in wide format (bulk insert)
+        import json as _json
         con = duckdb.connect(self.db_path)
         con.execute("BEGIN TRANSACTION")
         con.execute("DELETE FROM features_wide")
 
         for asset, fdf in feature_frames.items():
             cols = [c for c in fdf.columns if c not in ("timestamp", "asset")]
-            for _, row in fdf.dropna(subset=["timestamp"]).iterrows():
-                feat_dict = {c: float(row[c]) if pd.notna(row[c]) else 0.0 for c in cols}
-                import json
-                con.execute(
-                    "INSERT OR REPLACE INTO features_wide VALUES (?, ?, ?)",
-                    [row["timestamp"], asset, json.dumps(feat_dict)]
-                )
+            clean = fdf.dropna(subset=["timestamp"]).copy()
+            clean["feature_json"] = clean[cols].apply(
+                lambda r: _json.dumps({c: float(r[c]) if pd.notna(r[c]) else 0.0 for c in cols}), axis=1
+            )
+            bulk = clean[["timestamp", "feature_json"]].copy()
+            bulk["asset"] = asset
+            bulk = bulk[["timestamp", "asset", "feature_json"]]
+            con.execute("INSERT INTO features_wide SELECT * FROM bulk")
+            logger.info("Bulk-inserted {} feature rows for {}", len(bulk), asset)
 
         con.execute("COMMIT")
         con.close()
@@ -302,7 +305,7 @@ class FeatureFactory:
             return json.loads(row[0])
         return {}
 
-    def get_feature_names(self) -> list[str]:
+    def get_feature_names(self):
         """Get all feature names."""
         vec = self.get_feature_vector("ES")
         return list(vec.keys()) if vec else []
