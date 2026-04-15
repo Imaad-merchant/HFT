@@ -87,13 +87,28 @@ def _render_index_html(payload: dict, days: int, brochure: bool = False) -> str:
             "</section>"
         )
 
+    # Primary charts: the new simple line-style view with dual Y axis.
+    # Each regime is its own line so values can be read directly without
+    # interpreting stacked-band thickness.
+    simple_blocks: list[str] = []
+    for asset in forecasts:
+        if "error" in forecasts[asset]:
+            continue
+        simple_blocks.append(
+            '<section class="chart simple">'
+            f'  <img src="hmm_simple_{asset.lower()}.png" alt="{asset} simple HMM forecast">'
+            "</section>"
+        )
+
+    # Secondary charts: the original 3-panel "advanced" view, kept for users
+    # who want the regime stack + decay curve + return path broken out.
     chart_blocks: list[str] = []
     for asset in forecasts:
         if "error" in forecasts[asset]:
             continue
         chart_blocks.append(
             '<section class="chart">'
-            f'  <h2>{asset}</h2>'
+            f'  <h2>{asset} — detailed view</h2>'
             f'  <img src="hmm_forecast_{asset.lower()}.png" alt="{asset} HMM forecast">'
             "</section>"
         )
@@ -138,6 +153,7 @@ def _render_index_html(payload: dict, days: int, brochure: bool = False) -> str:
                             border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.4); }}
     section.chart {{ margin: 16px 0; padding: 14px; background: #161b22;
                      border-radius: 8px; }}
+    section.chart.simple {{ padding: 8px; margin: 8px 0; }}
     section.chart h2 {{ margin: 0 0 10px 0; font-weight: 600; color: #e7eaee;
                         font-size: 16px; }}
     section.chart img {{ width: 100%; height: auto; display: block;
@@ -153,6 +169,7 @@ def _render_index_html(payload: dict, days: int, brochure: bool = False) -> str:
     <h1>ARIA HMM Regime Forecast</h1>
     <p>Generated {payload['generated_at']} &middot; horizon {days} trading days</p>
   </header>
+  {''.join(simple_blocks)}
   {brochure_block}
   <div class="table-wrap">
     <table>
@@ -229,6 +246,9 @@ def build(
             payload = fc.to_dict()
             payload["expected_first_dump_days"] = det.expected_first_passage_to_dump()
             forecasts[asset] = payload
+            # New simple single-panel chart (lines + dual axis) — primary view
+            det.plot_simple_forecast(n_days=days, output_dir=out_dir)
+            # Original 3-panel chart kept as the "advanced" view
             det.plot_forecast(n_days=days, output_dir=out_dir)
             fitted_detectors.append(det)
             logger.info(

@@ -737,6 +737,172 @@ class HMMRegimeDetector:
 
         return bars / max(1, self.bars_per_day)
 
+    def plot_simple_forecast(
+        self,
+        n_days: int = 30,
+        output_dir: str | Path = "dashboard",
+    ) -> Path:
+        """Render a single-panel dual-axis forecast chart that's easier to read.
+
+        Replaces the 3-panel stacked-area layout with one chart:
+          - X axis: trading days from now
+          - Left Y axis: probability of each regime (0-100%) as separate lines
+          - Right Y axis: cumulative expected log-return (%)
+
+        Each regime is a separate line (not stacked) so the value at any point
+        can be read directly without interpreting band thickness or stack
+        position. The expected-return path is overlaid as a dashed line on the
+        right axis so risk and reward are visible at a glance.
+        """
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+        df = self.forecast_horizon(n_days=n_days)
+        fpt_days = self.expected_first_passage_to_dump()
+        days = df["day"].values
+
+        # Current state and key numbers used in the title/subtitle
+        current_row = df.iloc[0]
+        regime_columns = [
+            (lab, f"p_{lab}")
+            for lab in REGIME_LABELS[: self.n_states]
+            if f"p_{lab}" in df.columns
+        ]
+        current_probs = {lab: float(current_row[col]) for lab, col in regime_columns}
+        current_regime = max(current_probs.items(), key=lambda kv: kv[1])[0]
+        p_dump_end = float(df.iloc[-1]["p_dump"])
+        cum_return_end_pct = float(df.iloc[-1]["cum_e_logret"]) * 100.0
+
+        # Brand palette
+        BG = "#0f1216"
+        PANEL = "#161b22"
+        TEXT_PRI = "#e7eaee"
+        TEXT_SEC = "#8e98a6"
+        RETURN_COLOR = "#5dade2"
+
+        REGIME_COLORS_LOCAL = {
+            "BULL":   "#2ecc71",
+            "NORMAL": "#f1c40f",
+            "BEAR":   "#e67e22",
+            "CRASH":  "#c0392b",
+        }
+
+        fig, ax_prob = plt.subplots(figsize=(12, 6.8), dpi=140, facecolor=BG)
+        ax_prob.set_facecolor(PANEL)
+
+        # --- Probability lines (one per regime, NOT stacked) ---
+        for lab, col in regime_columns:
+            color = REGIME_COLORS_LOCAL.get(lab, "#95a5a6")
+            ax_prob.plot(
+                days, df[col].values * 100.0,
+                color=color, linewidth=2.6, label=f"P({lab})",
+                alpha=0.95, zorder=3,
+            )
+
+        ax_prob.set_xlim(0, max(1.0, float(days.max())))
+        ax_prob.set_ylim(0, 100)
+        ax_prob.set_xlabel("Trading days from now", color=TEXT_SEC, fontsize=12)
+        ax_prob.set_ylabel("Probability of regime (%)", color=TEXT_SEC, fontsize=12)
+        ax_prob.tick_params(colors=TEXT_SEC, labelsize=10)
+
+        # 50% reference line on the probability axis
+        ax_prob.axhline(50, color=TEXT_SEC, linestyle="--", linewidth=0.8, alpha=0.5)
+        ax_prob.text(
+            float(days.max()) * 0.99, 51, "50% threshold",
+            color=TEXT_SEC, fontsize=8, ha="right", va="bottom", alpha=0.7,
+        )
+
+        # First-passage time marker
+        if fpt_days is not None and 0.0 < fpt_days <= float(days.max()):
+            ax_prob.axvline(fpt_days, color="#ffffff", linestyle=":", linewidth=1.5, alpha=0.75)
+            ax_prob.text(
+                fpt_days + float(days.max()) * 0.01, 96,
+                f"first stress ~{fpt_days:.1f}d",
+                color="#ffffff", fontsize=9, va="top", ha="left",
+                bbox=dict(facecolor=BG, edgecolor="#ffffff", pad=2.5, linewidth=0.6),
+            )
+
+        # --- Cumulative expected return on twin Y axis ---
+        ax_ret = ax_prob.twinx()
+        cum_pct = df["cum_e_logret"].values * 100.0
+        ax_ret.plot(
+            days, cum_pct,
+            color=RETURN_COLOR, linewidth=2.8, linestyle="--",
+            label="Expected return", zorder=4, alpha=0.95,
+        )
+        ax_ret.fill_between(
+            days, 0, cum_pct, where=(cum_pct >= 0),
+            interpolate=True, color="#2ecc71", alpha=0.10,
+        )
+        ax_ret.fill_between(
+            days, 0, cum_pct, where=(cum_pct < 0),
+            interpolate=True, color="#c0392b", alpha=0.12,
+        )
+        ax_ret.axhline(0, color=TEXT_SEC, linewidth=0.5, alpha=0.5)
+        ax_ret.set_ylabel("Cumulative expected return (%)", color=RETURN_COLOR, fontsize=12)
+        ax_ret.tick_params(axis="y", colors=RETURN_COLOR, labelsize=10)
+
+        # Symmetric padded scale for the return axis so 0 stays in view
+        ret_extent = max(abs(float(np.nanmin(cum_pct))), abs(float(np.nanmax(cum_pct))), 0.1)
+        ax_ret.set_ylim(-ret_extent * 1.4, ret_extent * 1.4)
+        for spine in ax_ret.spines.values():
+            spine.set_color("#222932")
+
+        # --- Title + subtitle (the answer in plain English) ---
+        title = f"{self.primary_asset} — Currently {current_regime}"
+        fig.suptitle(title, color=TEXT_PRI, fontsize=18, fontweight="bold", y=0.98)
+
+        if fpt_days is None:
+            fpt_str = "no stress path"
+        elif fpt_days == 0.0:
+            fpt_str = "currently in stress"
+        else:
+            fpt_str = f"first stress ~{fpt_days:.1f}d"
+        drift_word = "up" if cum_return_end_pct > 0 else ("down" if cum_return_end_pct < 0 else "flat")
+        subtitle = (
+            f"P(stress) at day {n_days}: {p_dump_end * 100:.0f}%"
+            f"   |   {fpt_str}"
+            f"   |   expected drift: {cum_return_end_pct:+.2f}% ({drift_word})"
+        )
+        fig.text(0.5, 0.93, subtitle, color=TEXT_SEC, fontsize=11, ha="center")
+
+        # --- Combined legend (probability lines + expected return line) ---
+        lines_prob, labels_prob = ax_prob.get_legend_handles_labels()
+        lines_ret, labels_ret = ax_ret.get_legend_handles_labels()
+        legend = ax_prob.legend(
+            lines_prob + lines_ret, labels_prob + labels_ret,
+            loc="upper right", framealpha=0.92,
+            facecolor=BG, edgecolor=TEXT_SEC,
+            fontsize=10, ncol=1,
+        )
+        for text in legend.get_texts():
+            text.set_color(TEXT_PRI)
+
+        # Style spines and grid on the probability axis
+        for spine in ax_prob.spines.values():
+            spine.set_color("#222932")
+        ax_prob.grid(True, alpha=0.18, color=TEXT_SEC, linestyle="-", linewidth=0.4)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.91])
+
+        out_path = output_dir / f"hmm_simple_{self.primary_asset.lower()}.png"
+        fig.savefig(out_path, dpi=140, facecolor=BG, bbox_inches="tight")
+        plt.close(fig)
+
+        # Also write the underlying trajectory CSV alongside, mirroring plot_forecast
+        csv_path = output_dir / f"hmm_simple_{self.primary_asset.lower()}.csv"
+        df.to_csv(csv_path, index=False)
+
+        logger.info(
+            "HMM[{}]: saved simple visualization {} (data {})",
+            self.primary_asset, out_path, csv_path,
+        )
+        return out_path
+
     def plot_forecast(
         self,
         n_days: int = 30,
