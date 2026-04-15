@@ -10,3 +10,4 @@ evolution_fitness.csv
 .DS_Store
 dashboard/hmm_forecast_*.png
 dashboard/hmm_forecast_*.csv
+dashboard/site/
