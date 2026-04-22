@@ -2,69 +2,174 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --bg: #f8f4ec;
-  --ink: #1a1713;
-  --muted: #6b6258;
-  --accent: #b5532a;
-  --rule: #d9cfbf;
+@layer base {
+  :root {
+    /* white base, sage-green accent (#608f6c) */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 135 20% 47%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 135 20% 47%;
+    --radius: 0.75rem;
+
+    --nav-glass-bg: 0 0% 100% / 0.75;
+    --nav-glass-blur: 18px;
+    --nav-glass-saturate: 1.6;
+    --nav-float-ring: 0 0% 90% / 0.6;
+
+    --safe-area-inset-top: env(safe-area-inset-top);
+    --safe-area-inset-bottom: env(safe-area-inset-bottom);
+  }
+
+  .dark {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 0 0% 95%;
+    --primary-foreground: 0 0% 7%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 135 25% 58%;
+    --accent-foreground: 0 0% 7%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 95%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 135 25% 58%;
+
+    --nav-glass-bg: 0 0% 7% / 0.65;
+    --nav-glass-blur: 20px;
+    --nav-glass-saturate: 1.4;
+    --nav-float-ring: 0 0% 20% / 0.6;
+  }
 }
 
-html,
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  font-size: 18px;
-  line-height: 1.65;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+    font-size: 18px;
+    line-height: 1.65;
+  }
+
+  body,
+  a,
+  button,
+  input,
+  textarea,
+  select,
+  [role="button"] {
+    transition:
+      background-color 200ms ease,
+      border-color 200ms ease,
+      color 200ms ease,
+      box-shadow 150ms ease,
+      transform 150ms ease;
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.25);
+    color: hsl(var(--foreground));
+  }
 }
 
-.font-display {
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  letter-spacing: -0.01em;
+@layer components {
+  .font-display {
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+    letter-spacing: -0.015em;
+  }
+  .font-ui {
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  .glass {
+    background: hsl(var(--nav-glass-bg));
+    backdrop-filter: saturate(var(--nav-glass-saturate))
+      blur(var(--nav-glass-blur));
+    -webkit-backdrop-filter: saturate(var(--nav-glass-saturate))
+      blur(var(--nav-glass-blur));
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 font-ui text-xs uppercase tracking-widest;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-primary px-5 py-2 font-ui text-sm text-primary-foreground hover:opacity-90;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center rounded-full border border-border px-5 py-2 font-ui text-sm hover:bg-secondary;
+  }
+
+  .card-surface {
+    @apply rounded-2xl border border-border bg-card text-card-foreground;
+  }
+
+  .rule {
+    @apply border-t border-border;
+  }
 }
 
-.font-ui {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
+@layer utilities {
+  .fade-in {
+    animation: fadeIn 400ms ease-out both;
+  }
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 
-.prose-body p {
-  margin: 1em 0;
-}
-.prose-body h2 {
-  font-size: 1.5rem;
-  margin: 1.6em 0 0.5em;
-  font-weight: 600;
-}
-.prose-body h3 {
-  font-size: 1.2rem;
-  margin: 1.4em 0 0.4em;
-  font-weight: 600;
-}
-.prose-body a {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.prose-body blockquote {
-  border-left: 3px solid var(--accent);
-  padding-left: 1rem;
-  font-style: italic;
-  color: var(--muted);
-  margin: 1.2em 0;
-}
-.prose-body ul,
-.prose-body ol {
-  padding-left: 1.5rem;
-  margin: 1em 0;
-}
-.prose-body ul {
-  list-style: disc;
-}
-.prose-body ol {
-  list-style: decimal;
-}
-
-.rule {
-  border-top: 1px solid var(--rule);
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted) / 0.4),
+      hsl(var(--muted) / 0.8),
+      hsl(var(--muted) / 0.4)
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
 }

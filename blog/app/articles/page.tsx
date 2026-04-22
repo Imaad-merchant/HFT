@@ -11,7 +11,9 @@ export default function ArticlesPage({
 }) {
   const activeTopic = searchParams?.topic?.toLowerCase();
   const posts = getAllPostMeta();
-  const filtered = activeTopic ? posts.filter((p) => p.topic.toLowerCase() === activeTopic) : posts;
+  const filtered = activeTopic
+    ? posts.filter((p) => p.topic.toLowerCase() === activeTopic)
+    : posts;
   const topics = getTopics();
 
   const grouped = new Map<string, typeof posts>();
@@ -23,23 +25,21 @@ export default function ArticlesPage({
 
   return (
     <div>
-      <div className="font-ui text-xs uppercase tracking-widest text-[var(--accent)] mb-3">
-        Articles
-      </div>
-      <h1 className="font-display text-4xl md:text-5xl font-semibold">
+      <div className="chip text-accent border-accent/40">Articles</div>
+      <h1 className="mt-5 font-display text-4xl md:text-5xl font-semibold">
         {activeTopic ? `#${activeTopic}` : "Everything, sorted by topic"}
       </h1>
-      <p className="mt-3 max-w-2xl text-[var(--muted)]">
+      <p className="mt-3 max-w-2xl text-muted-foreground">
         Browse by subject. Paid-only essays are marked and open for members.
       </p>
 
       <div className="mt-8 flex flex-wrap gap-2 font-ui text-xs uppercase tracking-widest">
         <Link
           href="/articles"
-          className={`px-3 py-1 rounded-full border ${
+          className={`rounded-full border px-3 py-1 ${
             !activeTopic
-              ? "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)]"
-              : "border-[var(--rule)]"
+              ? "bg-primary text-primary-foreground border-primary"
+              : "border-border hover:bg-secondary"
           }`}
         >
           All
@@ -48,13 +48,14 @@ export default function ArticlesPage({
           <Link
             key={t.topic}
             href={`/articles?topic=${encodeURIComponent(t.topic)}`}
-            className={`px-3 py-1 rounded-full border capitalize ${
+            className={`rounded-full border px-3 py-1 capitalize ${
               activeTopic === t.topic.toLowerCase()
-                ? "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)]"
-                : "border-[var(--rule)]"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-border hover:bg-secondary"
             }`}
           >
-            {t.topic} <span className="opacity-60">({t.count})</span>
+            {t.topic}{" "}
+            <span className="opacity-60">({t.count})</span>
           </Link>
         ))}
       </div>
@@ -62,7 +63,7 @@ export default function ArticlesPage({
       <div className="mt-10 space-y-12">
         {[...grouped.entries()].map(([topic, items]) => (
           <section key={topic}>
-            <h2 className="font-display text-2xl font-semibold capitalize border-b border-[var(--rule)] pb-2">
+            <h2 className="font-display text-2xl font-semibold capitalize border-b border-border pb-2">
               {topic}
             </h2>
             <div>
@@ -73,7 +74,9 @@ export default function ArticlesPage({
           </section>
         ))}
         {filtered.length === 0 && (
-          <p className="text-[var(--muted)]">Nothing here yet for this topic.</p>
+          <p className="text-muted-foreground">
+            Nothing here yet for this topic.
+          </p>
         )}
       </div>
     </div>

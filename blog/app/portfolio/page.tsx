@@ -42,41 +42,36 @@ const projects: Project[] = [
 export default function PortfolioPage() {
   return (
     <div>
-      <div className="font-ui text-xs uppercase tracking-widest text-[var(--accent)] mb-3">
-        Portfolio
-      </div>
-      <h1 className="font-display text-4xl md:text-5xl font-semibold">
+      <div className="chip text-accent border-accent/40">Portfolio</div>
+      <h1 className="mt-5 font-display text-4xl md:text-5xl font-semibold">
         Projects, research, and side work.
       </h1>
-      <p className="mt-3 max-w-2xl text-[var(--muted)]">
+      <p className="mt-3 max-w-2xl text-muted-foreground">
         A living list of the things I&apos;m building, researching, or
         publishing. Some are personal, some academic, some just experiments.
       </p>
 
-      <ul className="mt-10 space-y-8">
+      <ul className="mt-10 space-y-6">
         {projects.map((p) => (
-          <li key={p.title} className="border-b border-[var(--rule)] pb-8">
+          <li key={p.title} className="card-surface p-6">
             <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2">
               <h2 className="font-display text-2xl font-semibold">
                 {p.link ? (
-                  <Link href={p.link} className="hover:text-[var(--accent)]">
+                  <Link href={p.link} className="hover:text-accent">
                     {p.title}
                   </Link>
                 ) : (
                   p.title
                 )}
               </h2>
-              <div className="font-ui text-xs uppercase tracking-widest text-[var(--muted)]">
+              <div className="font-ui text-xs uppercase tracking-widest text-muted-foreground">
                 {p.role} &middot; {p.year}
               </div>
             </div>
-            <p className="mt-3 text-[var(--muted)]">{p.summary}</p>
-            <div className="mt-3 flex flex-wrap gap-2 font-ui text-xs uppercase tracking-widest">
+            <p className="mt-3 text-muted-foreground">{p.summary}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
               {p.tags.map((t) => (
-                <span
-                  key={t}
-                  className="px-2 py-0.5 border border-[var(--rule)] rounded-full"
-                >
+                <span key={t} className="chip text-muted-foreground">
                   {t}
                 </span>
               ))}
