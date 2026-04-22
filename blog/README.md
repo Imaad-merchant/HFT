@@ -50,3 +50,34 @@ Copy `.env.example` to `.env.local` and fill in the keys. The paywall on
 `/posts/[slug]` is purely display-layer today — once you have auth + Stripe
 set up, check the user's subscription status server-side and return the full
 HTML when they're a paid member.
+
+## Deploying to Vercel
+
+The site is configured via `vercel.json` (framework pinned to Next.js, sensible
+security headers). Two ways to deploy:
+
+**Dashboard:** vercel.com/new → import this repo → Vercel auto-detects Next.js
+and deploys. If this is a monorepo (e.g. still inside the HFT repo), set
+**Root Directory** to `blog`.
+
+**CLI:**
+
+```bash
+npx vercel login
+npx vercel            # preview
+npx vercel --prod     # production
+```
+
+### Preview deployments on PRs
+
+`.github/workflows/preview.yml` deploys a Vercel preview for every PR and
+posts the URL as a sticky comment. Add these repo secrets in GitHub
+(Settings → Secrets and variables → Actions):
+
+- `VERCEL_TOKEN` — create at vercel.com/account/tokens
+- `VERCEL_ORG_ID` — from `.vercel/project.json` after the first `vercel` run, or Project → Settings → General
+- `VERCEL_PROJECT_ID` — same source as above
+
+Vercel's built-in Git integration also comments preview URLs automatically if
+you connect the repo through the Vercel dashboard — this workflow is useful
+if you'd rather run the deploy from CI than from Vercel's side.
